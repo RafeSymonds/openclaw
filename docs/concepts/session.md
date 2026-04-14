@@ -60,10 +60,12 @@ Verify your setup with `openclaw security audit`.
 
 Sessions are reused until they expire:
 
-- **Daily reset** (default) -- new session at 4:00 AM local time on the gateway
-  host.
-- **Idle reset** (optional) -- new session after a period of inactivity. Set
-  `session.reset.idleMinutes`.
+- **No automatic reset** (default) -- sessions persist indefinitely until
+  manually reset or `session.reset` is configured.
+- **Daily reset** -- new session at a configured hour (default 4:00 AM local
+  time on the gateway host). Set `session.reset.mode: "daily"`.
+- **Idle reset** -- new session after a period of inactivity. Set
+  `session.reset.mode: "idle"` and `session.reset.idleMinutes`.
 - **Manual reset** -- type `/new` or `/reset` in chat. `/new <model>` also
   switches the model.
 
