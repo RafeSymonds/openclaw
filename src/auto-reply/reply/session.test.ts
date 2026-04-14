@@ -1187,11 +1187,37 @@ describe("initSessionState reset policy", () => {
     vi.useRealTimers();
   });
 
-  it("defaults to daily reset at 4am local time", async () => {
+  it("does not reset session when no reset policy is configured", async () => {
+    vi.setSystemTime(new Date(2026, 0, 18, 5, 0, 0));
+    const root = await makeCaseDir("openclaw-reset-none-");
+    const storePath = path.join(root, "sessions.json");
+    const sessionKey = "agent:main:whatsapp:dm:s1";
+    const existingSessionId = "no-reset-session-id";
+
+    await writeSessionStoreFast(storePath, {
+      [sessionKey]: {
+        sessionId: existingSessionId,
+        updatedAt: new Date(2026, 0, 18, 3, 0, 0).getTime(),
+      },
+    });
+
+    // No session.reset configured — default is "none", sessions persist indefinitely.
+    const cfg = { session: { store: storePath } } as OpenClawConfig;
+    const result = await initSessionState({
+      ctx: { Body: "hello", SessionKey: sessionKey },
+      cfg,
+      commandAuthorized: true,
+    });
+
+    expect(result.isNewSession).toBe(false);
+    expect(result.sessionId).toBe(existingSessionId);
+  });
+
+  it("resets session at 4am when daily reset is explicitly configured", async () => {
     vi.setSystemTime(new Date(2026, 0, 18, 5, 0, 0));
     const root = await makeCaseDir("openclaw-reset-daily-");
     const storePath = path.join(root, "sessions.json");
-    const sessionKey = "agent:main:whatsapp:dm:s1";
+    const sessionKey = "agent:main:whatsapp:dm:s1-daily";
     const existingSessionId = "daily-session-id";
 
     await writeSessionStoreFast(storePath, {
@@ -1201,7 +1227,9 @@ describe("initSessionState reset policy", () => {
       },
     });
 
-    const cfg = { session: { store: storePath } } as OpenClawConfig;
+    const cfg = {
+      session: { store: storePath, reset: { mode: "daily" as const, atHour: 4 } },
+    } as OpenClawConfig;
     const result = await initSessionState({
       ctx: { Body: "hello", SessionKey: sessionKey },
       cfg,
@@ -1230,7 +1258,9 @@ describe("initSessionState reset policy", () => {
       },
     });
 
-    const cfg = { session: { store: storePath } } as OpenClawConfig;
+    const cfg = {
+      session: { store: storePath, reset: { mode: "daily" as const, atHour: 4 } },
+    } as OpenClawConfig;
     const result = await initSessionState({
       ctx: { Body: "hello", SessionKey: sessionKey },
       cfg,
@@ -1890,7 +1920,9 @@ describe("initSessionState preserves behavior overrides across /new and /reset",
       });
       await fs.writeFile(transcriptPath, '{"type":"message"}\n', "utf8");
 
-      const cfg = { session: { store: storePath } } as OpenClawConfig;
+      const cfg = {
+        session: { store: storePath, reset: { mode: "daily" as const, atHour: 4 } },
+      } as OpenClawConfig;
       const result = await initSessionState({
         ctx: {
           Body: "hello",

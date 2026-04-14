@@ -110,19 +110,49 @@ describe("resolveSessionResetPolicy", () => {
         resetType: "group",
       });
 
+      // group has no type-specific override, but resetByType is set so hasExplicitReset=true;
+      // falls back to "daily" (explicit partial-config default), not DEFAULT_RESET_MODE or the dm alias
       expect(groupPolicy.mode).toBe("daily");
     });
   });
 
-  it("defaults to daily resets at 4am local time", () => {
+  it("defaults to no automatic reset when session.reset is unset", () => {
     const policy = resolveSessionResetPolicy({
       resetType: "direct",
     });
 
     expect(policy).toMatchObject({
-      mode: "daily",
-      atHour: 4,
+      mode: "none",
     });
+  });
+
+  it("defaults to daily mode when explicit reset config is present without a mode", () => {
+    const policy = resolveSessionResetPolicy({
+      sessionCfg: { reset: { atHour: 6 } },
+      resetType: "direct",
+    });
+
+    expect(policy).toMatchObject({
+      mode: "daily",
+      atHour: 6,
+    });
+  });
+
+  it("suppresses idleMinutes when mode is explicitly none", () => {
+    const policy = resolveSessionResetPolicy({
+      sessionCfg: { reset: { mode: "none", idleMinutes: 60 } },
+      resetType: "direct",
+    });
+
+    expect(policy.mode).toBe("none");
+    expect(policy.idleMinutes).toBeUndefined();
+
+    const freshness = evaluateSessionFreshness({
+      updatedAt: 1_000,
+      now: 60 * 60 * 1_000 + 1, // well past the 60-minute idle window
+      policy,
+    });
+    expect(freshness.fresh).toBe(true);
   });
 
   it("treats idleMinutes=0 as never expiring by inactivity", () => {

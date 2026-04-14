@@ -1,7 +1,7 @@
 import type { SessionConfig, SessionResetConfig } from "../types.base.js";
 import { DEFAULT_IDLE_MINUTES } from "./types.js";
 
-export type SessionResetMode = "daily" | "idle";
+export type SessionResetMode = "daily" | "idle" | "none";
 export type SessionResetType = "direct" | "group" | "thread";
 
 export type SessionResetPolicy = {
@@ -16,7 +16,7 @@ export type SessionFreshness = {
   idleExpiresAt?: number;
 };
 
-export const DEFAULT_RESET_MODE: SessionResetMode = "daily";
+export const DEFAULT_RESET_MODE: SessionResetMode = "none";
 export const DEFAULT_RESET_AT_HOUR = 4;
 
 export function resolveDailyResetAtMs(now: number, atHour: number): number {
@@ -48,14 +48,19 @@ export function resolveSessionResetPolicy(params: {
   const mode =
     typeReset?.mode ??
     baseReset?.mode ??
-    (!hasExplicitReset && legacyIdleMinutes != null ? "idle" : DEFAULT_RESET_MODE);
+    // When no explicit reset config at all, use DEFAULT_RESET_MODE ("none").
+    // When explicit reset config is present but no mode specified, default to "daily".
+    (!hasExplicitReset ? (legacyIdleMinutes != null ? "idle" : DEFAULT_RESET_MODE) : "daily");
   const atHour = normalizeResetAtHour(
     typeReset?.atHour ?? baseReset?.atHour ?? DEFAULT_RESET_AT_HOUR,
   );
   const idleMinutesRaw = typeReset?.idleMinutes ?? baseReset?.idleMinutes ?? legacyIdleMinutes;
 
   let idleMinutes: number | undefined;
-  if (idleMinutesRaw != null) {
+  if (mode === "none") {
+    // "none" disables all automatic reset; suppress idle expiry even if idleMinutes is set.
+    idleMinutes = undefined;
+  } else if (idleMinutesRaw != null) {
     const normalized = Math.floor(idleMinutesRaw);
     if (Number.isFinite(normalized)) {
       idleMinutes = Math.max(normalized, 0);
