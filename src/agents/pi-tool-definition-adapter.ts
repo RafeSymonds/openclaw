@@ -9,6 +9,7 @@ import { redactToolDetail } from "../logging/redact.js";
 import { isPlainObject } from "../utils.js";
 import { sanitizeForConsole } from "./console-sanitize.js";
 import type { ClientToolDefinition } from "./pi-embedded-runner/run/params.js";
+import { isRunAbortError } from "./pi-tools.abort.js";
 import type { HookContext } from "./pi-tools.before-tool-call.js";
 import {
   isToolWrappedWithBeforeToolCallHook,
@@ -204,13 +205,17 @@ export function toToolDefinitions(tools: AnyAgentTool[]): ToolDefinition[] {
           if (signal?.aborted) {
             throw err;
           }
-          const name =
-            err && typeof err === "object" && "name" in err
-              ? String((err as { name?: unknown }).name)
-              : "";
-          if (name === "AbortError") {
+          // Run-level aborts (from wrapToolWithAbortSignal) tag the error with
+          // a marker so we can still terminate the turn even when the pi
+          // framework's per-call signal argument is undefined or not aborted.
+          if (isRunAbortError(err)) {
             throw err;
           }
+          // AbortError without an aborted parent signal means an internal
+          // timeout or upstream cancellation (e.g. vision tool's 30s timeout,
+          // provider incident), not user/turn cancellation. Fall through and
+          // surface it as a tool_result so the agent can recover instead of
+          // hanging the turn.
           const described = describeToolExecutionError(err);
           if (described.stack && described.stack !== described.message) {
             logDebug(`tools: ${normalizedName} failed stack:\n${described.stack}`);

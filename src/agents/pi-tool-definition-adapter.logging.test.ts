@@ -69,6 +69,122 @@ describe("pi tool definition adapter logging", () => {
     );
   });
 
+  it("converts internal AbortError to tool_result when parent signal isn't aborted", async () => {
+    const abortError = Object.assign(new Error("Request was aborted"), { name: "AbortError" });
+    const baseTool = {
+      name: "image",
+      label: "Image",
+      description: "vision tool",
+      parameters: Type.Object({ image: Type.String() }),
+      execute: async () => {
+        throw abortError;
+      },
+    } satisfies AgentTool;
+
+    const [def] = toToolDefinitions([baseTool]);
+    if (!def) {
+      throw new Error("missing tool definition");
+    }
+
+    const controller = new AbortController();
+    const result = (await def.execute(
+      "call-image-1",
+      { image: "a.png" },
+      controller.signal,
+      undefined,
+      extensionContext,
+    )) as { content: Array<{ type: string; text: string }> };
+
+    expect(controller.signal.aborted).toBe(false);
+    expect(result.content?.[0]?.text).toContain("Request was aborted");
+    expect(logError).toHaveBeenCalledWith(
+      expect.stringContaining("[tools] image failed: Request was aborted"),
+    );
+  });
+
+  it("rethrows run-level aborts wrapped by wrapToolWithAbortSignal (pre-execute)", async () => {
+    const { wrapToolWithAbortSignal } = await import("./pi-tools.abort.js");
+    const baseTool = {
+      name: "image",
+      label: "Image",
+      description: "vision tool",
+      parameters: Type.Object({ image: Type.String() }),
+      execute: vi.fn(async () => ({
+        content: [{ type: "text" as const, text: "ok" }],
+        details: { ok: true },
+      })),
+    } satisfies AgentTool;
+
+    const runController = new AbortController();
+    runController.abort();
+    const wrapped = wrapToolWithAbortSignal(baseTool, runController.signal);
+    const [def] = toToolDefinitions([wrapped]);
+    if (!def) {
+      throw new Error("missing tool definition");
+    }
+
+    await expect(
+      def.execute("call-image-run-1", { image: "a.png" }, undefined, undefined, extensionContext),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(baseTool.execute).not.toHaveBeenCalled();
+  });
+
+  it("rethrows run-level aborts that trip during tool execution", async () => {
+    const { wrapToolWithAbortSignal } = await import("./pi-tools.abort.js");
+    const runController = new AbortController();
+    const baseTool = {
+      name: "image",
+      label: "Image",
+      description: "vision tool",
+      parameters: Type.Object({ image: Type.String() }),
+      execute: async () => {
+        runController.abort();
+        const err = Object.assign(new Error("Request was aborted"), { name: "AbortError" });
+        throw err;
+      },
+    } satisfies AgentTool;
+
+    const wrapped = wrapToolWithAbortSignal(baseTool, runController.signal);
+    const [def] = toToolDefinitions([wrapped]);
+    if (!def) {
+      throw new Error("missing tool definition");
+    }
+
+    await expect(
+      def.execute("call-image-run-2", { image: "a.png" }, undefined, undefined, extensionContext),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("rethrows AbortError when parent signal is aborted", async () => {
+    const abortError = Object.assign(new Error("Request was aborted"), { name: "AbortError" });
+    const baseTool = {
+      name: "image",
+      label: "Image",
+      description: "vision tool",
+      parameters: Type.Object({ image: Type.String() }),
+      execute: async () => {
+        throw abortError;
+      },
+    } satisfies AgentTool;
+
+    const [def] = toToolDefinitions([baseTool]);
+    if (!def) {
+      throw new Error("missing tool definition");
+    }
+
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      def.execute(
+        "call-image-2",
+        { image: "a.png" },
+        controller.signal,
+        undefined,
+        extensionContext,
+      ),
+    ).rejects.toBe(abortError);
+  });
+
   it("accepts nested edits arrays for the current edit schema", async () => {
     const execute = vi.fn(async (_toolCallId: string, params: unknown) => ({
       content: [{ type: "text" as const, text: JSON.stringify(params) }],

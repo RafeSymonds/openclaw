@@ -3,9 +3,24 @@ import { bindAbortRelay } from "../utils/fetch-timeout.js";
 import { copyChannelAgentToolMeta } from "./channel-tools.js";
 import type { AnyAgentTool } from "./pi-tools.types.js";
 
+export const RUN_ABORT_MARKER = "__openclawRunAbort";
+
+export function markRunAbortError(err: unknown): void {
+  if (err && typeof err === "object") {
+    (err as Record<string, unknown>)[RUN_ABORT_MARKER] = true;
+  }
+}
+
+export function isRunAbortError(err: unknown): boolean {
+  return Boolean(
+    err && typeof err === "object" && (err as Record<string, unknown>)[RUN_ABORT_MARKER] === true,
+  );
+}
+
 function throwAbortError(): never {
   const err = new Error("Aborted");
   err.name = "AbortError";
+  markRunAbortError(err);
   throw err;
 }
 
@@ -63,7 +78,18 @@ export function wrapToolWithAbortSignal(
       if (combined?.aborted) {
         throwAbortError();
       }
-      return await execute(toolCallId, params, combined, onUpdate);
+      try {
+        return await execute(toolCallId, params, combined, onUpdate);
+      } catch (err) {
+        // If the run-level signal tripped during execution (e.g. fetch was
+        // canceled via the combined signal), tag the error so the tool
+        // definition adapter rethrows it to terminate the turn instead of
+        // converting it into a tool_result.
+        if (abortSignal.aborted && !signal?.aborted) {
+          markRunAbortError(err);
+        }
+        throw err;
+      }
     },
   };
   copyPluginToolMeta(tool, wrappedTool);
